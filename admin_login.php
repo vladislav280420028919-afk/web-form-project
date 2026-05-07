@@ -99,10 +99,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="password" name="password" placeholder="Пароль" required>
             <button type="submit">Войти</button>
         </form>
-        <div class="info">
-            Логин: admin<br>
-            Пароль: admin123
-        </div>
     </div>
 </body>
 </html>
