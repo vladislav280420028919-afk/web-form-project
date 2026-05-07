@@ -1,0 +1,8 @@
+Options -Indexes
+RedirectMatch 404 /\.git
+Header unset X-Powered-By
+
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
