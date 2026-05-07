@@ -1,0 +1,24 @@
+# Логи и временные файлы
+*.log
+*.tmp
+*.swp
+*~
+
+# Конфиги с паролями (если есть отдельные)
+# .env
+
+# Файлы IDE
+.vscode/
+.idea/
+
+# OS файлы
+.DS_Store
+Thumbs.db
+
+# Тестовые файлы (можно удалить позже)
+admin_test.php
+test_*.php
+check_*.php
+fix_*.php
+force_*.php
+create_*.php
