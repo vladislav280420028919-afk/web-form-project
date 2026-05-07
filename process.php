@@ -1,150 +1,130 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 session_start();
+require_once 'config.php';
 
 // Функция валидации
-function validateForm($data) {
+function validateForm($data, $isEdit = false) {
     $errors = [];
     
-    // 1. ФИО
     $full_name = trim($data['full_name'] ?? '');
     if (empty($full_name)) {
-        $errors['full_name'] = 'ФИО обязательно для заполнения';
-    } elseif (!preg_match('/^[a-zA-Zа-яА-ЯёЁ\s\-]{2,100}$/u', $full_name)) {
-        $errors['full_name'] = 'ФИО должно содержать только буквы, пробелы и дефис. Длина: 2-100 символов';
+        $errors['full_name'] = 'ФИО обязательно';
+    } elseif (strlen($full_name) < 2) {
+        $errors['full_name'] = 'ФИО слишком короткое';
     }
     
-    // 2. Телефон
     $phone = trim($data['phone'] ?? '');
     if (empty($phone)) {
-        $errors['phone'] = 'Телефон обязателен для заполнения';
-    } elseif (!preg_match('/^(\+7|8)[\s\-]?\(?[0-9]{3}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}$/', $phone)) {
-        $errors['phone'] = 'Неверный формат телефона. Пример: +7 (912) 345-67-89 или 89123456789';
+        $errors['phone'] = 'Телефон обязателен';
+    } elseif (!preg_match('/^[\+\d\s\(\)-]{10,20}$/', $phone)) {
+        $errors['phone'] = 'Неверный формат телефона';
     }
     
-    // 3. Email
     $email = trim($data['email'] ?? '');
     if (empty($email)) {
-        $errors['email'] = 'Email обязателен для заполнения';
-    } elseif (!preg_match('/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', $email)) {
-        $errors['email'] = 'Неверный формат email. Пример: user@domain.ru';
+        $errors['email'] = 'Email обязателен';
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors['email'] = 'Неверный email';
     }
     
-    // 4. Дата рождения
-    $birth_date = $data['birth_date'] ?? '';
-    if (empty($birth_date)) {
-        $errors['birth_date'] = 'Дата рождения обязательна';
-    } else {
-        $date = DateTime::createFromFormat('Y-m-d', $birth_date);
-        if (!$date || $date->format('Y-m-d') !== $birth_date) {
-            $errors['birth_date'] = 'Неверный формат даты';
-        } else {
-            $today = new DateTime();
-            $age = $today->diff($date)->y;
-            if ($age < 18 || $age > 100) {
-                $errors['birth_date'] = 'Возраст должен быть от 18 до 100 лет';
-            }
-        }
-    }
-    
-    // 5. Пол
-    $gender = $data['gender'] ?? '';
-    if (empty($gender)) {
-        $errors['gender'] = 'Выберите пол';
-    } elseif (!in_array($gender, ['male', 'female'])) {
-        $errors['gender'] = 'Неверное значение пола';
-    }
-    
-    // 6. Языки программирования
-    $languages = $data['languages'] ?? [];
-    if (empty($languages)) {
-        $errors['languages'] = 'Выберите хотя бы один язык программирования';
-    } elseif (!is_array($languages)) {
-        $errors['languages'] = 'Неверный формат данных';
-    }
-    
-    // 7. Согласие
-    $contract_agreed = $data['contract_agreed'] ?? '';
-    if ($contract_agreed !== '1') {
+    if (empty($data['contract_agreed'])) {
         $errors['contract_agreed'] = 'Необходимо согласие на обработку данных';
     }
     
     return $errors;
 }
 
-// Проверяем метод запроса
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
-    exit;
+// Функция генерации случайного пароля
+function generatePassword($length = 10) {
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%';
+    return substr(str_shuffle($chars), 0, $length);
 }
 
-// Очищаем данные
-$cleanedData = [];
-foreach ($_POST as $key => $value) {
-    if (is_array($value)) {
-        $cleanedData[$key] = array_map('trim', $value);
-    } else {
-        $cleanedData[$key] = trim(htmlspecialchars($value, ENT_QUOTES, 'UTF-8'));
+// Функция генерации уникального логина
+function generateUniqueLogin($pdo, $base = 'user') {
+    $login = $base . rand(1000, 9999);
+    $stmt = $pdo->prepare("SELECT id FROM application WHERE login = ?");
+    $stmt->execute([$login]);
+    while ($stmt->fetch()) {
+        $login = $base . rand(1000, 9999);
+        $stmt->execute([$login]);
     }
+    return $login;
 }
 
-// Валидируем
-$errors = validateForm($cleanedData);
+// Получаем данные
+$postData = $_POST;
+$errors = validateForm($postData, isset($_SESSION['user_id']));
 
-// Сохраняем данные в Cookies на 1 год (всегда)
-setcookie('form_data', json_encode($cleanedData), time() + 365*24*3600, '/');
-
-// Если есть ошибки
 if (!empty($errors)) {
-    setcookie('form_errors', json_encode($errors), time() + 3600, '/');
+    $_SESSION['form_data'] = $postData;
+    $_SESSION['form_errors'] = $errors;
     header('Location: index.php');
     exit;
 }
 
-// Сохранение в базу данных
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=u82420;charset=utf8mb4", "u82420", "1644474");
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    
     $pdo->beginTransaction();
     
-    // Вставляем в application
-    $sql = "INSERT INTO application (full_name, phone, email, birth_date, gender, biography, contract_agreed, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        $cleanedData['full_name'],
-        $cleanedData['phone'],
-        $cleanedData['email'],
-        $cleanedData['birth_date'],
-        $cleanedData['gender'],
-        $cleanedData['biography'] ?? '',
-        $cleanedData['contract_agreed']
-    ]);
+    $full_name = trim($postData['full_name']);
+    $phone = trim($postData['phone']);
+    $email = trim($postData['email']);
+    $birth_date = !empty($postData['birth_date']) ? $postData['birth_date'] : null;
+    $gender = $postData['gender'] ?? null;
+    $biography = trim($postData['biography'] ?? '');
+    $contract_agreed = isset($postData['contract_agreed']) ? 1 : 0;
+    $languages = $postData['languages'] ?? [];
     
-    $application_id = $pdo->lastInsertId();
+    // Если пользователь авторизован - ОБНОВЛЯЕМ
+    if (isset($_SESSION['user_id'])) {
+        $stmt = $pdo->prepare("UPDATE application SET 
+            full_name = ?, phone = ?, email = ?, birth_date = ?, 
+            gender = ?, biography = ?, contract_agreed = ?, is_edited = 1 
+            WHERE id = ?");
+        $stmt->execute([$full_name, $phone, $email, $birth_date, $gender, $biography, $contract_agreed, $_SESSION['user_id']]);
+        $appId = $_SESSION['user_id'];
+        
+        // Удаляем старые языки
+        $pdo->prepare("DELETE FROM application_language WHERE application_id = ?")->execute([$appId]);
+    } 
+    // Иначе - новая заявка с генерацией логина/пароля
+    else {
+        $login = generateUniqueLogin($pdo);
+        $plainPassword = generatePassword();
+        $passwordHash = password_hash($plainPassword, PASSWORD_DEFAULT);
+        
+        $stmt = $pdo->prepare("INSERT INTO application 
+            (login, password_hash, full_name, phone, email, birth_date, gender, biography, contract_agreed) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$login, $passwordHash, $full_name, $phone, $email, $birth_date, $gender, $biography, $contract_agreed]);
+        $appId = $pdo->lastInsertId();
+        
+        // Сохраняем логин/пароль в сессию для показа 1 раз
+        $_SESSION['generated_login'] = $login;
+        $_SESSION['generated_password'] = $plainPassword;
+    }
     
-    // Вставляем языки
-    $sqlLang = "INSERT INTO application_language (application_id, language_id) VALUES (?, ?)";
-    $stmtLang = $pdo->prepare($sqlLang);
-    foreach ($cleanedData['languages'] as $lang_id) {
-        $stmtLang->execute([$application_id, $lang_id]);
+    // Сохраняем языки
+    foreach ($languages as $langId) {
+        $stmtLang = $pdo->prepare("INSERT INTO application_language (application_id, language_id) VALUES (?, ?)");
+        $stmtLang->execute([$appId, $langId]);
     }
     
     $pdo->commit();
     
-    // Успех - удаляем ошибки
-    setcookie('form_errors', '', time() - 3600, '/');
-    header('Location: index.php?success=1');
-    exit;
+    // Если не авторизован - сохраняем в куки (как в задании 4)
+    if (!isset($_SESSION['user_id'])) {
+        setcookie('last_application', json_encode(['full_name' => $full_name, 'email' => $email]), time() + 86400, '/');
+    }
     
-} catch (PDOException $e) {
-    $pdo->rollBack();
-    $errors['database'] = 'Ошибка базы данных: ' . $e->getMessage();
-    setcookie('form_errors', json_encode($errors), time() + 3600, '/');
     header('Location: index.php');
-    exit;
+    
+} catch (Exception $e) {
+    $pdo->rollBack();
+    $_SESSION['form_errors']['db'] = 'Ошибка сохранения: ' . $e->getMessage();
+    $_SESSION['form_data'] = $postData;
+    header('Location: index.php');
 }
+exit;
 ?>
+
